@@ -1,0 +1,45 @@
+name: publish to PyPI
+
+# Two ways to fire this:
+#   1. Publish a GitHub Release (the normal path, tag it v1.0.0)
+#   2. Actions tab -> "publish to PyPI" -> Run workflow (manual, no release needed)
+#
+# GitHub's runners can reach upload.pypi.org, which is what makes this the
+# route that works from a phone: nothing has to run on your own machine.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The tests gate the upload. A release to PyPI cannot be taken back:
+      # a version number is burned forever once used, even if you delete the
+      # file. Better to fail here than to publish something broken.
+      - name: Run tests
+        run: |
+          pip install -e ".[dev]"
+          pytest -q
+
+      - name: Build
+        run: |
+          pip install build twine
+          python -m build
+          twine check dist/*
+
+      - name: Upload to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: twine upload --non-interactive dist/*
