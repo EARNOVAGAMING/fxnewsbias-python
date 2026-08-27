@@ -4,6 +4,8 @@ Python client for the [FXNewsBias](https://fxnewsbias.com) API: AI-scored news s
 
 One number per currency, 0 to 100, refreshed every few hours. Built to sit in front of a strategy as a news filter.
 
+Free tier available: any account can create a key at [fxnewsbias.com/developers](https://fxnewsbias.com/developers), no card required.
+
 [![PyPI](https://img.shields.io/pypi/v/fxnewsbias.svg)](https://pypi.org/project/fxnewsbias/)
 [![Python](https://img.shields.io/pypi/pyversions/fxnewsbias.svg)](https://pypi.org/project/fxnewsbias/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -82,7 +84,20 @@ A bot polling every 15 minutes uses 96 calls a day. `follow()` uses about 8.
 
 ## Getting a key
 
-You need a Pro subscription. Sign in at [fxnewsbias.com/developers](https://fxnewsbias.com/developers) and create a key there.
+Create a free account, sign in at [fxnewsbias.com/developers](https://fxnewsbias.com/developers), and the key panel creates one instantly. No card, no application form.
+
+Two tiers, same key format, same client code:
+
+| | Free | Pro |
+|---|---|---|
+| Price | $0 | from $20/month |
+| Requests per UTC day | 25 | 1,000 |
+| Data freshness | previous 3-hour cycle | current cycle, real-time |
+| `sentiment()` | yes, delayed | yes |
+| `session_bias()` | no | yes |
+| Use | non-commercial, with attribution | commercial, in your own product |
+
+Free responses carry `delayed: true` and `delay_hours: 3` (reachable via `.raw`), so the freshness is never ambiguous. `follow()` fits the free tier well: it spends about 8 of the 25 daily calls. Upgrading later changes nothing in your code; the same key switches to real-time automatically.
 
 Pass it directly, or set `FXNEWSBIAS_API_KEY` and let the client find it:
 
