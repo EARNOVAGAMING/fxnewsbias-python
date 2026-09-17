@@ -156,9 +156,26 @@ class Client:
 
             # Answers, not failures. Never retried.
             if status == 401:
+                # Prefer the server's reason. It distinguishes a missing header
+                # from a malformed one from a key that is no longer active, and
+                # the last of those names the cause a working integration
+                # actually hits: regenerating a key replaces the previous one.
+                # Guessing locally threw all three away.
                 raise AuthError(
-                    "Key rejected. It may be revoked, or the subscription may have "
-                    "ended. " + _KEY_HELP,
+                    (body.get("message")
+                     or "Key rejected. It may be revoked, or the subscription "
+                        "may have ended.") + " " + _KEY_HELP,
+                    status=status,
+                    body=body,
+                )
+            if status == 402:
+                # Authenticated, but the key's plan does not include the
+                # endpoint. A plan answer, not a server fault: without this it
+                # fell through to ServerError and looked like an outage.
+                raise PlanError(
+                    body.get("message")
+                    or "This endpoint is not included in your plan. "
+                    "See https://fxnewsbias.com/pricing",
                     status=status,
                     body=body,
                 )

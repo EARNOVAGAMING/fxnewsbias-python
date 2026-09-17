@@ -178,10 +178,30 @@ def test_seconds_until_next_update_is_none_when_absent():
 
 # ----------------------------------------------------------------- error paths
 
-def test_401_explains_the_likely_cause():
+def test_401_falls_back_when_the_server_says_nothing():
     with pytest.raises(AuthError) as e:
         make(status=401, body={"error": "unauthorized"}).sentiment()
     assert "subscription" in str(e.value)
+    assert "fxnewsbias.com/developers" in str(e.value)
+
+
+def test_401_prefers_the_server_message():
+    # The server distinguishes missing, malformed and inactive. Guessing
+    # locally threw that away, which is the whole point of this test.
+    msg = ("This key is not active. Regenerating a key replaces the previous "
+           "one, and a revoked key stops working immediately.")
+    with pytest.raises(AuthError) as e:
+        make(status=401, body={"error": "unauthorized", "message": msg}).sentiment()
+    assert "Regenerating a key replaces the previous one" in str(e.value)
+    assert "may have ended" not in str(e.value)
+
+
+def test_402_is_a_plan_answer_not_a_server_error():
+    with pytest.raises(PlanError) as e:
+        make(status=402, body={"error": "upgrade-required",
+                               "message": "Sentiment history is included with FXNewsBias Pro."}).sentiment()
+    assert "included with FXNewsBias Pro" in str(e.value)
+    assert e.value.status == 402
 
 
 def test_403_carries_the_server_message():
