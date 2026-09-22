@@ -2,7 +2,7 @@
 
 Python client for the [FXNewsBias](https://fxnewsbias.com) API: AI-scored news sentiment for the 8 major currencies, as JSON.
 
-One number per currency, 0 to 100, refreshed every few hours. Built to sit in front of a strategy as a news filter.
+One number per currency, 0 to 100, refreshed every three hours. Currency labels are 0-40 Bearish, 41-59 Neutral and 60-100 Bullish. Scores describe selected headline tone, not the probability of a price move. A currency without a supported catalyst receives 50 Neutral with an explicit explanation. See the [scoring methodology](https://fxnewsbias.com/how).
 
 Free tier available: any account can create a key at [fxnewsbias.com/developers](https://fxnewsbias.com/developers), no card required.
 
@@ -29,8 +29,8 @@ USD 55 Neutral
 EUR 52 Neutral
 GBP 50 Neutral
 NZD 50 Neutral
-JPY 48 Bearish
-CHF 45 Bearish
+JPY 48 Neutral
+CHF 45 Neutral
 CAD 35 Bearish
 ```
 
@@ -120,7 +120,7 @@ try:
 except RateLimitError as e:
     print(f"allowance spent, resets in {e.retry_after}s")
 except AuthError:
-    print("key revoked or subscription ended")
+    print("key missing, invalid, replaced or revoked")
 except PlanError:
     print("that endpoint is not on this plan")
 except ServerError as e:
