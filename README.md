@@ -95,6 +95,8 @@ Two tiers, same key format, same client code:
 | Data freshness | previous 3-hour cycle | current cycle, real-time |
 | `sentiment()` | yes, delayed | yes |
 | `session_bias()` | no | yes |
+| `sentiment_history()` | no | yes, every cycle since 2026-05-19 |
+| `session_bias_history()` | no | yes, settled scorecard since 2026-08-06 |
 | Use | non-commercial, with attribution | commercial, in your own product |
 
 Free responses carry `delayed: true` and `delay_hours: 3` (reachable via `.raw`), so the freshness is never ambiguous. `follow()` fits the free tier well: it spends about 8 of the 25 daily calls. Upgrading later changes nothing in your code; the same key switches to real-time automatically.
@@ -127,7 +129,9 @@ except ServerError as e:
     print(f"upstream problem: {e.status}")
 ```
 
-A 401, 403 or 429 is an answer, not a failure, so none of them are retried. A 5xx or a dropped connection is retried twice with backoff.
+A 401, 402, 403 or 429 is an answer, not a failure, so none of them are retried.
+
+When a Pro subscription ends the key keeps working: it moves to the free tier in place, so `sentiment()` carries on with delayed data and Pro-only calls raise `PlanError`. Nothing needs changing in your code either way. A 5xx or a dropped connection is retried twice with backoff.
 
 Rate limit state from the last call is on the client:
 
@@ -163,12 +167,51 @@ Per-pair directional read for the most recent session. Pro plans only; raises `P
 
 ```python
 sb = fx.session_bias()
-sb.session            # 'asia'
+sb.session            # 'asean', 'london' or 'newyork'
 sb.session_date       # '2026-08-23'
 
 for p in sb:
     print(p.pair, p.tone, p.strength)
 ```
+
+### `fx.sentiment_history()`
+
+Every past 3-hour reading, oldest first. Pro plans only; raises `PlanError` on a free key.
+
+```python
+h = fx.sentiment_history("EUR", start="2026-09-01", end="2026-09-07")
+
+for r in h:
+    print(r.scored_at, r.score, r.bias)
+
+h.by_currency()       # {'EUR': [...]} when no currency is given, all 8
+h.paging.has_more     # True when the range is longer than one page
+```
+
+`start` and `end` are inclusive UTC dates (`"YYYY-MM-DD"` or a `date`). Leave them out for the last 30 days, and leave out the currency for all 8. A page holds up to 5,000 rows.
+
+For a long range, `iter_sentiment_history()` follows the pages for you. Each page is one request, so a full year for all 8 currencies costs about 5:
+
+```python
+for r in fx.iter_sentiment_history(start="2026-05-19"):
+    store(r.currency, r.scored_at, r.score)
+```
+
+### `fx.session_bias_history()`
+
+The settled session scorecard: what was called for each pair, what price did next, and whether it agreed. Misses included. Pro plans only.
+
+```python
+h = fx.session_bias_history("GBP/JPY", start="2026-09-01")
+
+h.summary.aligned_pct   # hit rate over the whole range, not just this page
+h.summary.directional   # aligned + contra, the calls that count
+
+for s in h:
+    print(s.session_date, s.session, s.tone, s.alignment, s.move_pips)
+```
+
+`alignment` is `'aligned'` (price went the called way), `'contra'` (it went against), `'quiet'` (a call, but the move was too small to count) or `'na'` (a Neutral call, nothing to score). Only aligned and contra count toward the hit rate. `iter_session_bias_history()` pages the same way as sentiment.
 
 ## Worked example: a news filter for a backtest
 
@@ -217,7 +260,7 @@ Tests run against a fake transport, so they need no key and never touch the live
 
 - [API documentation](https://fxnewsbias.com/developers)
 - [Pricing](https://fxnewsbias.com/pricing)
-- [Data quality report](https://fxnewsbias.com/data-quality) — live coverage figures, updated automatically
+- [Data quality report](https://fxnewsbias.com/data-quality): live coverage figures, updated automatically
 
 ## Attribution
 

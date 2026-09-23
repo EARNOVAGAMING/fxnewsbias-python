@@ -181,7 +181,9 @@ def test_seconds_until_next_update_is_none_when_absent():
 def test_401_falls_back_when_the_server_says_nothing():
     with pytest.raises(AuthError) as e:
         make(status=401, body={"error": "unauthorized"}).sentiment()
-    assert "subscription" in str(e.value)
+    # An ended subscription downgrades the key, it never 401s, so the
+    # fallback must not blame the subscription.
+    assert "revoked" in str(e.value) and "subscription" not in str(e.value)
     assert "fxnewsbias.com/developers" in str(e.value)
 
 
@@ -288,3 +290,187 @@ def test_session_bias_parses():
 def test_context_manager_closes():
     with Client(VALID_KEY, session=FakeSession()) as c:
         assert len(c.sentiment()) == 8
+
+
+# ------------------------------------------------------------------ history
+
+from urllib.parse import parse_qs, urlparse  # noqa: E402
+
+from fxnewsbias import (  # noqa: E402
+    SentimentHistory,
+    SessionBiasHistory,
+)
+
+
+def _hist_page(rows, offset, limit, total):
+    consumed = offset + len(rows)
+    more = consumed < total
+    return {
+        "schema": "fxnb.sentiment.history.v1",
+        "generated_at": "2026-09-23T10:00:00Z",
+        "query": {"from": "2026-09-01", "to": "2026-09-02", "currency": None},
+        "coverage_from": "2026-05-19",
+        "paging": {
+            "offset": offset, "limit": limit, "returned": len(rows),
+            "total_matching": total, "has_more": more,
+            "next_offset": consumed if more else None,
+        },
+        "data": rows,
+    }
+
+
+class PagingSession:
+    """Serves a fixed list of rows in pages, honouring limit and offset."""
+
+    def __init__(self, rows, total=None):
+        self.rows = rows
+        self.total = len(rows) if total is None else total
+        self.urls = []
+
+    def get(self, url, headers=None, timeout=None):
+        self.urls.append(url)
+        q = parse_qs(urlparse(url).query)
+        limit = int(q.get("limit", ["500"])[0])
+        offset = int(q.get("offset", ["0"])[0])
+        body = _hist_page(self.rows[offset:offset + limit], offset, limit, self.total)
+        return FakeResponse(200, body, {"x-ratelimit-limit": "1000", "x-ratelimit-remaining": "990"})
+
+    def close(self):
+        pass
+
+
+READINGS = [
+    {"currency": c, "score": 40 + i, "bias": "Neutral", "scored_at": f"2026-09-01T{h:02d}:00:00+00:00"}
+    for h in (0, 3, 6) for i, c in enumerate(["USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"])
+]
+
+
+def test_sentiment_history_builds_the_query():
+    sess = PagingSession(READINGS)
+    fx = Client(VALID_KEY, session=sess)
+    h = fx.sentiment_history("eur", start="2026-09-01", end=datetime(2026, 9, 2, 15, tzinfo=timezone.utc), limit=100)
+    q = parse_qs(urlparse(sess.urls[0]).query)
+    assert urlparse(sess.urls[0]).path == "/api/v1/sentiment/history"
+    assert q == {"currency": ["EUR"], "from": ["2026-09-01"], "to": ["2026-09-02"], "limit": ["100"]}
+    assert isinstance(h, SentimentHistory)
+    assert h.coverage_from == "2026-05-19"
+
+
+def test_sentiment_history_parses_rows_and_groups():
+    fx = Client(VALID_KEY, session=PagingSession(READINGS))
+    h = fx.sentiment_history()
+    assert len(h) == 24
+    assert h.paging.total_matching == 24 and h.paging.next_offset is None
+    first = h.data[0]
+    assert first.currency == "USD" and first.score == 40
+    assert first.scored_at == datetime(2026, 9, 1, 0, tzinfo=timezone.utc)
+    groups = h.by_currency()
+    assert set(groups) == {"USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "NZD"}
+    assert [r.scored_at.hour for r in groups["EUR"]] == [0, 3, 6]
+
+
+def test_no_params_sends_a_bare_path():
+    sess = PagingSession(READINGS)
+    Client(VALID_KEY, session=sess).sentiment_history()
+    assert sess.urls[0].endswith("/api/v1/sentiment/history")
+
+
+def test_iter_sentiment_history_follows_every_page_once():
+    sess = PagingSession(READINGS)
+    fx = Client(VALID_KEY, session=sess)
+    got = list(fx.iter_sentiment_history(page_size=10))
+    assert len(got) == 24
+    assert [r.raw for r in got] == READINGS          # no row lost or repeated
+    assert len(sess.urls) == 3                         # 10 + 10 + 4
+    offsets = [parse_qs(urlparse(u).query).get("offset", ["0"])[0] for u in sess.urls]
+    assert offsets == ["0", "10", "20"]
+
+
+def test_iter_stops_on_an_empty_page_even_if_server_says_more():
+    sess = PagingSession([], total=50)                 # claims more, returns none
+    assert list(Client(VALID_KEY, session=sess).iter_sentiment_history()) == []
+    assert len(sess.urls) == 1
+
+
+@pytest.mark.parametrize("kw", [
+    {"start": "2026-13-01"}, {"end": "yesterday"}, {"limit": 0}, {"limit": 5001}, {"offset": -1},
+])
+def test_bad_history_arguments_fail_before_any_request(kw):
+    sess = PagingSession(READINGS)
+    with pytest.raises(ValueError):
+        Client(VALID_KEY, session=sess).sentiment_history(**kw)
+    assert sess.urls == []
+
+
+SESSIONS_BODY = {
+    "schema": "fxnb.session_bias.history.v1",
+    "generated_at": "2026-09-23T10:00:00Z",
+    "query": {"from": "2026-09-01", "to": "2026-09-23", "pair": "GBP/JPY", "status": "settled"},
+    "coverage_from": "2026-08-06",
+    "paging": {"offset": 0, "limit": 500, "returned": 3, "total_matching": 3, "has_more": False, "next_offset": None},
+    "summary": {"settled": 3, "aligned": 1, "contra": 1, "directional": 2, "aligned_pct": 50.0},
+    "data": [
+        {"pair": "GBP/JPY", "session": "london", "session_date": "2026-09-01", "tone": "Bullish", "strength": 2,
+         "entry_price": "209.10", "entry_time": "2026-09-01T07:00:00+00:00", "result_price": 209.9,
+         "result_time": "2026-09-01T12:00:00+00:00", "move_pct": 0.38, "move_pips": 80, "alignment": "aligned", "status": "settled"},
+        {"pair": "GBP/JPY", "session": "newyork", "session_date": "2026-09-01", "tone": "Bearish", "strength": 1,
+         "entry_price": 209.9, "entry_time": "2026-09-01T12:00:00+00:00", "result_price": 210.4,
+         "result_time": "2026-09-01T21:00:00+00:00", "move_pct": 0.24, "move_pips": 50, "alignment": "contra", "status": "settled"},
+        {"pair": "GBP/JPY", "session": "asia", "session_date": "2026-09-02", "tone": "Neutral", "strength": 0,
+         "entry_price": 210.4, "entry_time": None, "result_price": None,
+         "result_time": None, "move_pct": None, "move_pips": None, "alignment": "na", "status": "settled"},
+    ],
+}
+
+
+def test_session_bias_history_parses_summary_and_rows():
+    sess = FakeSession(body=SESSIONS_BODY)
+    fx = Client(VALID_KEY, session=sess)
+    h = fx.session_bias_history("gbpjpy", start="2026-09-01")
+    assert isinstance(h, SessionBiasHistory)
+    s = h.summary
+    assert (s.settled, s.aligned, s.contra, s.directional, s.aligned_pct) == (3, 1, 1, 2, 50.0)
+    assert s.aligned + s.contra == s.directional
+    a, c, n = h.data
+    assert a.is_aligned and a.is_directional and a.entry_price == 209.10 and a.move_pips == 80
+    assert not c.is_aligned and c.is_directional
+    assert not n.is_directional and n.result_price is None and n.entry_time is None
+    assert h.coverage_from == "2026-08-06"
+
+
+def test_session_bias_history_missing_summary_is_none_not_zeros():
+    body = dict(SESSIONS_BODY, summary=None, summary_unavailable="A count could not be computed")
+    h = Client(VALID_KEY, session=FakeSession(body=body)).session_bias_history()
+    assert h.summary is None
+
+
+def test_free_key_on_history_raises_plan_error_with_server_message():
+    body = {"error": "upgrade-required", "message": "Sentiment history is included with FXNewsBias Pro."}
+    sess = FakeSession(status=402, body=body)
+    with pytest.raises(PlanError) as e:
+        Client(VALID_KEY, session=sess).sentiment_history()
+    assert e.value.status == 402 and "included with FXNewsBias Pro" in e.value.message
+    assert sess.calls == 1                             # a plan answer is never retried
+
+
+def test_bad_request_from_server_is_not_retried_and_keeps_body():
+    body = {"error": "bad-pair", "message": "pair must be two of USD, EUR ..."}
+    sess = FakeSession(status=400, body=body)
+    with pytest.raises(ServerError) as e:
+        Client(VALID_KEY, session=sess).session_bias_history("XXXYYY")
+    assert e.value.status == 400 and e.value.body["error"] == "bad-pair"
+    assert sess.calls == 1
+
+
+@pytest.mark.parametrize("raw,micro", [
+    ("2026-09-15T00:13:19.49+00:00", 490000),
+    ("2026-09-22T00:00:46.129317+00:00", 129317),
+    ("2026-09-23T10:00:40.826Z", 826000),
+    ("2026-09-15T00:13:19.1234567+00:00", 123456),
+    ("2026-09-15T00:13:19+00:00", 0),
+])
+def test_timestamps_parse_with_any_fraction_length(raw, micro):
+    from fxnewsbias.models import _parse_ts
+
+    ts = _parse_ts(raw)
+    assert ts is not None and ts.tzinfo is not None and ts.microsecond == micro

@@ -27,11 +27,15 @@ class FXNewsBiasError(Exception):
 
 
 class AuthError(FXNewsBiasError):
-    """401. The key is missing, malformed, revoked, or the subscription lapsed."""
+    """401. The key is missing, malformed, revoked, or replaced by a newer one.
+
+    A Pro subscription ending does not cause this: the key stays active and
+    moves to the free tier, so Pro-only calls raise ``PlanError`` instead.
+    """
 
 
 class PlanError(FXNewsBiasError):
-    """403. The key is valid but this endpoint is not on that plan."""
+    """402 or 403. The key is valid but this endpoint is not on its plan."""
 
 
 class RateLimitError(FXNewsBiasError):

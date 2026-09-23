@@ -12,7 +12,18 @@ Get a key at https://fxnewsbias.com/developers
 """
 
 from .client import Client
-from .models import Currency, Sentiment, SessionBias, PairBias
+from .models import (
+    Currency,
+    Sentiment,
+    SessionBias,
+    PairBias,
+    Paging,
+    SentimentReading,
+    SentimentHistory,
+    SettledSession,
+    ScorecardSummary,
+    SessionBiasHistory,
+)
 from .errors import (
     FXNewsBiasError,
     AuthError,
@@ -21,13 +32,19 @@ from .errors import (
     ServerError,
 )
 
-__version__ = "1.0.2"
+__version__ = "1.1.0"
 __all__ = [
     "Client",
     "Currency",
     "Sentiment",
     "SessionBias",
     "PairBias",
+    "Paging",
+    "SentimentReading",
+    "SentimentHistory",
+    "SettledSession",
+    "ScorecardSummary",
+    "SessionBiasHistory",
     "FXNewsBiasError",
     "AuthError",
     "RateLimitError",
