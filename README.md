@@ -190,6 +190,8 @@ h.paging.has_more     # True when the range is longer than one page
 
 `start` and `end` are inclusive UTC dates (`"YYYY-MM-DD"` or a `date`). Leave them out for the last 30 days, and leave out the currency for all 8. A page holds up to 5,000 rows.
 
+Labels have been set from the score since 23 Sep 2026. Earlier rows keep the label the scorer gave at the time, which sometimes sat a few points outside the bands above. If you need one consistent rule across the whole history, derive the label from `score`.
+
 For a long range, `iter_sentiment_history()` follows the pages for you. Each page is one request, so a full year for all 8 currencies costs about 5:
 
 ```python
