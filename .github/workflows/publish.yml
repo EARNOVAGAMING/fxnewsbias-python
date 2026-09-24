@@ -42,4 +42,9 @@ jobs:
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: twine upload --non-interactive dist/*
+        # --skip-existing: PyPI never accepts the same version twice. Without it,
+        # a GitHub Release for a version already uploaded (for example 1.1.0,
+        # published with the Run workflow button) would fail with a red run.
+        # With it, that upload is skipped and the run stays green; a new
+        # version number still uploads as normal.
+        run: twine upload --non-interactive --skip-existing dist/*
