@@ -1,4 +1,4 @@
-"""FXNewsBias: AI-scored forex news sentiment for the 8 major currencies.
+"""FXNewsBias: AI-scored forex news sentiment for the 8 major currencies and gold.
 
     pip install fxnewsbias
 
@@ -7,6 +7,9 @@
     fx = Client("fxnb_live_...")
     for c in fx.sentiment():
         print(c.currency, c.score, c.bias)
+
+    gold = fx.markets()["XAU"]          # Pro plans: gold and other markets
+    print(gold.score, gold.bias, gold.pair.gap)
 
 Get a key at https://fxnewsbias.com/developers
 """
@@ -23,16 +26,25 @@ from .models import (
     SettledSession,
     ScorecardSummary,
     SessionBiasHistory,
+    Market,
+    MarketPair,
+    Markets,
+    MarketReading,
+    MarketHistory,
+    MarketSessionBias,
+    MarketSettledSession,
+    MarketSessionBiasHistory,
 )
 from .errors import (
     FXNewsBiasError,
     AuthError,
     RateLimitError,
     PlanError,
+    RequestError,
     ServerError,
 )
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __all__ = [
     "Client",
     "Currency",
@@ -45,9 +57,18 @@ __all__ = [
     "SettledSession",
     "ScorecardSummary",
     "SessionBiasHistory",
+    "Market",
+    "MarketPair",
+    "Markets",
+    "MarketReading",
+    "MarketHistory",
+    "MarketSessionBias",
+    "MarketSettledSession",
+    "MarketSessionBiasHistory",
     "FXNewsBiasError",
     "AuthError",
     "RateLimitError",
     "PlanError",
+    "RequestError",
     "ServerError",
 ]

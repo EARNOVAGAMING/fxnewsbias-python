@@ -15,6 +15,20 @@ from typing import Any, Dict, Iterator, List, Optional
 
 _FRACTION = re.compile(r"\.(\d+)")
 
+# Symbols served by ``fx.markets()`` rather than ``fx.sentiment()``. Used only
+# to word error messages for someone looking in the wrong place; nothing is
+# filtered by it, so a market added later still parses without a release.
+_MARKET_CODES = ("XAU",)
+
+
+def _market_hint(code: str) -> str:
+    if code.upper() in _MARKET_CODES:
+        return (
+            f" {code.upper()} is not a currency score: gold and other markets are "
+            f"served by fx.markets() (Pro plans)."
+        )
+    return ""
+
 
 def _parse_ts(value: Optional[str]) -> Optional[datetime]:
     """Parse the API's ISO-8601 timestamps into aware datetimes.
@@ -87,7 +101,10 @@ class Sentiment:
         for c in self.data:
             if c.currency.upper() == want:
                 return c
-        raise KeyError(f"{code!r} not in this response: {[c.currency for c in self.data]}")
+        raise KeyError(
+            f"{code!r} not in this response: {[c.currency for c in self.data]}"
+            + _market_hint(code)
+        )
 
     def scores(self) -> Dict[str, int]:
         """{'AUD': 68, 'USD': 55, ...} for when a plain dict is easier."""
@@ -108,6 +125,10 @@ class Sentiment:
                 raise ValueError(
                     f"Cannot read {pair!r} as a currency pair: {code!r} is not one of "
                     f"{sorted(self.scores())}."
+                    + _market_hint(code)
+                    + (" For XAU/USD, fx.markets()['XAU'].pair.gap is the equivalent "
+                       "of spread(): the gold score minus the USD score."
+                       if code.upper() == "XAU" else "")
                 )
         return self[base].score - self[quote].score
 
@@ -398,6 +419,344 @@ class SessionBiasHistory:
             summary=ScorecardSummary._from(summ) if isinstance(summ, dict) else None,
             paging=Paging._from(d.get("paging") or {}),
             data=[SettledSession._from(x) for x in (d.get("data") or [])],
+            raw=d,
+        )
+
+
+# ------------------------------------------------------------------ markets
+#
+# Instruments beyond the 8 currencies, starting with gold (XAU). Pro plans
+# only. They live on their own endpoints so the currency responses above never
+# change shape. The list of markets grows over time: nothing here assumes how
+# many there are or which symbols exist.
+
+
+def _int_opt(value: Any) -> Optional[int]:
+    try:
+        return None if value is None else int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _str_opt(value: Any) -> Optional[str]:
+    return None if value is None else str(value)
+
+
+def _norm_symbol(text: str) -> str:
+    return str(text).upper().replace("/", "").replace("_", "").replace("-", "").strip()
+
+
+@dataclass(frozen=True)
+class MarketPair:
+    """A market read against its quote currency, for example XAU/USD.
+
+    ``gap`` is the market's score minus the latest quote currency score when
+    the reading was made (normally the same cycle), the same base minus quote
+    convention as ``Sentiment.spread``.
+    ``bias`` is the server's pair label: Bullish above +10, Bearish below -10,
+    Neutral in between. ``quote_score``, ``gap`` and ``bias`` are None when the
+    cycle had no quote currency score to compare against.
+    """
+
+    name: str
+    quote: str
+    quote_score: Optional[int]
+    gap: Optional[int]
+    bias: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def _from(cls, d: Dict[str, Any]) -> "MarketPair":
+        return cls(
+            name=str(d.get("name", "")),
+            quote=str(d.get("quote", "")),
+            quote_score=_int_opt(d.get("quote_score")),
+            gap=_int_opt(d.get("gap")),
+            bias=_str_opt(d.get("bias")),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class Market:
+    """One market's latest reading, for example gold.
+
+    ``score`` is on the same 0 to 100 scale as the currencies, with the same
+    labels (0-40 Bearish, 41-59 Neutral, 60-100 Bullish). ``drivers`` are the
+    short reasons behind the score, at most a few.
+    """
+
+    symbol: str
+    name: str
+    score: int
+    bias: str
+    drivers: List[str]
+    updated_at: Optional[datetime]
+    pair: MarketPair
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def is_bullish(self) -> bool:
+        return self.bias == "Bullish"
+
+    @property
+    def is_bearish(self) -> bool:
+        return self.bias == "Bearish"
+
+    @classmethod
+    def _from(cls, d: Dict[str, Any]) -> "Market":
+        drivers = d.get("drivers")
+        return cls(
+            symbol=str(d.get("symbol", "")),
+            name=str(d.get("name", "")),
+            score=int(d.get("score") or 0),
+            bias=str(d.get("bias", "")),
+            drivers=[str(x) for x in drivers] if isinstance(drivers, list) else [],
+            updated_at=_parse_ts(d.get("updated_at")),
+            pair=MarketPair._from(d.get("pair") or {}),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class Markets:
+    """A full /api/v1/markets response. Pro plans only.
+
+    Iterate it for the markets, or index it by symbol or pair:
+
+        m = fx.markets()
+        m["XAU"].score
+        m["XAU/USD"].pair.gap
+
+    The list grows as instruments are added, so do not rely on its length or
+    order. Look a market up by symbol instead.
+    """
+
+    generated_at: Optional[datetime]
+    next_update_expected: Optional[datetime]
+    data: List[Market]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    def __iter__(self) -> Iterator[Market]:
+        return iter(self.data)
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def __contains__(self, symbol: object) -> bool:
+        return isinstance(symbol, str) and self.get(symbol) is not None
+
+    def __getitem__(self, symbol: str) -> Market:
+        found = self.get(symbol)
+        if found is None:
+            raise KeyError(f"{symbol!r} not in this response: {self.symbols()}")
+        return found
+
+    def get(self, symbol: str, default: Optional[Market] = None) -> Optional[Market]:
+        """The market for ``'XAU'`` or ``'XAU/USD'`` (any case), else ``default``."""
+        want = _norm_symbol(symbol)
+        for m in self.data:
+            if _norm_symbol(m.symbol) == want or (m.pair.name and _norm_symbol(m.pair.name) == want):
+                return m
+        return default
+
+    def symbols(self) -> List[str]:
+        """['XAU', ...] in the order the server sent them."""
+        return [m.symbol for m in self.data]
+
+    def scores(self) -> Dict[str, int]:
+        """{'XAU': 66, ...} for when a plain dict is easier."""
+        return {m.symbol: m.score for m in self.data}
+
+    def seconds_until_next_update(self) -> Optional[float]:
+        """How long until the data changes, or None if the API did not say.
+
+        Never negative: a stale hint returns 0.0 rather than a negative sleep.
+        """
+        if not self.next_update_expected:
+            return None
+        delta = (self.next_update_expected - datetime.now(timezone.utc)).total_seconds()
+        return max(0.0, delta)
+
+    @classmethod
+    def _from(cls, d: Dict[str, Any]) -> "Markets":
+        return cls(
+            generated_at=_parse_ts(d.get("generated_at")),
+            next_update_expected=_parse_ts(d.get("next_update_expected")),
+            data=[Market._from(x) for x in (d.get("data") or [])],
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class MarketReading:
+    """One market's score from one past 3-hour cycle."""
+
+    symbol: str
+    score: int
+    bias: str
+    pair_gap: Optional[int]
+    pair_bias: Optional[str]
+    scored_at: Optional[datetime]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def is_bullish(self) -> bool:
+        return self.bias == "Bullish"
+
+    @property
+    def is_bearish(self) -> bool:
+        return self.bias == "Bearish"
+
+    @classmethod
+    def _from(cls, d: Dict[str, Any]) -> "MarketReading":
+        return cls(
+            symbol=str(d.get("symbol", "")),
+            score=int(d.get("score") or 0),
+            bias=str(d.get("bias", "")),
+            pair_gap=_int_opt(d.get("pair_gap")),
+            pair_bias=_str_opt(d.get("pair_bias")),
+            scored_at=_parse_ts(d.get("scored_at")),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class MarketHistory:
+    """One page of /api/v1/markets/history for one symbol. Pro plans only.
+
+    Oldest first, the same paging envelope as ``SentimentHistory``.
+    ``coverage_from`` is the first date the market was scored.
+    """
+
+    generated_at: Optional[datetime]
+    coverage_from: Optional[str]
+    paging: Paging
+    data: List[MarketReading]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    def __iter__(self) -> Iterator[MarketReading]:
+        return iter(self.data)
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    @classmethod
+    def _from(cls, d: Dict[str, Any]) -> "MarketHistory":
+        return cls(
+            generated_at=_parse_ts(d.get("generated_at")),
+            coverage_from=d.get("coverage_from"),
+            paging=Paging._from(d.get("paging") or {}),
+            data=[MarketReading._from(x) for x in (d.get("data") or [])],
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class MarketSessionBias:
+    """A full /api/v1/markets/session-bias response: the newest session call
+    for one market, for example XAU/USD. Pro plans only.
+
+    The call fields are None when the market has no call yet (``has_call`` is
+    False), for example before its first session.
+    """
+
+    symbol: str
+    generated_at: Optional[datetime]
+    pair: Optional[str]
+    tone: Optional[str]
+    strength: Optional[int]
+    session: Optional[str]
+    session_date: Optional[str]
+    entry_time: Optional[datetime]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def has_call(self) -> bool:
+        return self.pair is not None
+
+    @classmethod
+    def _from(cls, d: Dict[str, Any]) -> "MarketSessionBias":
+        call = d.get("data")
+        call = call if isinstance(call, dict) else {}
+        return cls(
+            symbol=str(d.get("symbol", "")),
+            generated_at=_parse_ts(d.get("generated_at")),
+            pair=_str_opt(call.get("pair")),
+            tone=_str_opt(call.get("tone")),
+            strength=_int_opt(call.get("strength")),
+            session=_str_opt(call.get("session")),
+            session_date=_str_opt(call.get("session_date")),
+            entry_time=_parse_ts(call.get("entry_time")),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class MarketSettledSession(SettledSession):
+    """One finished session call for a market, and how it turned out.
+
+    Everything ``SettledSession`` has, plus ``move_usd``: the move in US
+    dollars per unit (per ounce for gold). For gold, 1 pip is $0.10 per
+    ounce, so ``move_pips`` is ``move_usd * 10``.
+    """
+
+    move_usd: Optional[float] = None
+
+    @classmethod
+    def _from(cls, d: Dict[str, Any]) -> "MarketSettledSession":
+        return cls(
+            pair=str(d.get("pair", "")),
+            session=str(d.get("session", "")),
+            session_date=str(d.get("session_date", "")),
+            tone=str(d.get("tone", "")),
+            strength=int(d.get("strength") or 0),
+            entry_price=_num(d.get("entry_price")),
+            entry_time=_parse_ts(d.get("entry_time")),
+            result_price=_num(d.get("result_price")),
+            result_time=_parse_ts(d.get("result_time")),
+            move_pct=_num(d.get("move_pct")),
+            move_pips=_num(d.get("move_pips")),
+            alignment=str(d.get("alignment", "")),
+            raw=d,
+            move_usd=_num(d.get("move_usd")),
+        )
+
+
+@dataclass(frozen=True)
+class MarketSessionBiasHistory:
+    """One page of /api/v1/markets/session-bias/history. Pro plans only.
+
+    Settled calls for one market, misses included. ``summary`` covers that
+    market alone over the whole requested range, never mixed with the currency
+    pair scorecard, and is None when the server could not count the range.
+    ``pip_convention`` is the server's note on how ``move_pips`` is measured.
+    """
+
+    generated_at: Optional[datetime]
+    coverage_from: Optional[str]
+    pip_convention: Optional[str]
+    summary: Optional[ScorecardSummary]
+    paging: Paging
+    data: List[MarketSettledSession]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    def __iter__(self) -> Iterator[MarketSettledSession]:
+        return iter(self.data)
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    @classmethod
+    def _from(cls, d: Dict[str, Any]) -> "MarketSessionBiasHistory":
+        summ = d.get("summary")
+        return cls(
+            generated_at=_parse_ts(d.get("generated_at")),
+            coverage_from=d.get("coverage_from"),
+            pip_convention=_str_opt(d.get("pip_convention")),
+            summary=ScorecardSummary._from(summ) if isinstance(summ, dict) else None,
+            paging=Paging._from(d.get("paging") or {}),
+            data=[MarketSettledSession._from(x) for x in (d.get("data") or [])],
             raw=d,
         )
 

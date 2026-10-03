@@ -118,10 +118,30 @@ def test_scores_dict_and_iteration():
 
 
 def test_unknown_currency_says_what_was_available():
+    # XTS is the ISO 4217 code reserved for testing, so it can never be added.
     s = make().sentiment()
     with pytest.raises(KeyError) as e:
-        s["XAU"]
+        s["XTS"]
     assert "AUD" in str(e.value)
+    assert "markets()" not in str(e.value)         # no gold hint for a plain typo
+
+
+def test_gold_lookup_points_to_markets():
+    s = make().sentiment()
+    with pytest.raises(KeyError) as e:
+        s["xau"]
+    assert "AUD" in str(e.value) and "fx.markets()" in str(e.value)
+
+
+def test_gold_spread_points_to_markets():
+    s = make().sentiment()
+    with pytest.raises(ValueError) as e:
+        s.spread("XAU/USD")
+    assert "currency pair" in str(e.value)
+    assert "fx.markets()" in str(e.value) and "pair.gap" in str(e.value)
+    with pytest.raises(ValueError) as e:
+        s.favours("usdxau")
+    assert "fx.markets()" in str(e.value)
 
 
 def test_raw_is_kept_for_fields_this_version_does_not_know():
@@ -277,12 +297,12 @@ def test_session_bias_parses():
     body = {
         "schema": "fxnb.session_bias.v1",
         "generated_at": "2026-08-23T03:00:12Z",
-        "session": "asia",
+        "session": "asean",
         "session_date": "2026-08-23",
         "data": [{"pair": "AUD/USD", "tone": "Bullish", "strength": 4}],
     }
     sb = Client(VALID_KEY, session=FakeSession(body=body)).session_bias()
-    assert sb.session == "asia"
+    assert sb.session == "asean"
     assert len(sb) == 1
     assert sb.data[0].strength == 4
 
@@ -416,7 +436,7 @@ SESSIONS_BODY = {
         {"pair": "GBP/JPY", "session": "newyork", "session_date": "2026-09-01", "tone": "Bearish", "strength": 1,
          "entry_price": 209.9, "entry_time": "2026-09-01T12:00:00+00:00", "result_price": 210.4,
          "result_time": "2026-09-01T21:00:00+00:00", "move_pct": 0.24, "move_pips": 50, "alignment": "contra", "status": "settled"},
-        {"pair": "GBP/JPY", "session": "asia", "session_date": "2026-09-02", "tone": "Neutral", "strength": 0,
+        {"pair": "GBP/JPY", "session": "asean", "session_date": "2026-09-02", "tone": "Neutral", "strength": 0,
          "entry_price": 210.4, "entry_time": None, "result_price": None,
          "result_time": None, "move_pct": None, "move_pips": None, "alignment": "na", "status": "settled"},
     ],
@@ -474,3 +494,413 @@ def test_timestamps_parse_with_any_fraction_length(raw, micro):
 
     ts = _parse_ts(raw)
     assert ts is not None and ts.tzinfo is not None and ts.microsecond == micro
+
+
+# ------------------------------------------------------------------ markets
+#
+# Fixtures mirror the server's response shapes for the markets endpoints
+# (schema fxnb.markets.*.v1). Gold is the first market; the list grows, so the
+# client must never assume its length or that XAU is the only symbol.
+
+from fxnewsbias import (  # noqa: E402
+    Market,
+    MarketHistory,
+    Markets,
+    MarketSessionBias,
+    MarketSessionBiasHistory,
+    MarketSettledSession,
+    SettledSession,
+)
+
+ATTRIBUTION = {"required": True, "text": "Data by FXNewsBias", "url": "https://fxnewsbias.com"}
+
+MARKETS_BODY = {
+    "schema": "fxnb.markets.v1",
+    "generated_at": "2026-10-05T06:05:12.481Z",
+    "next_update_expected": "2026-10-05T09:00:00.000Z",
+    "attribution": ATTRIBUTION,
+    "data": [
+        {
+            "symbol": "XAU", "name": "Gold", "score": 66, "bias": "Bullish",
+            "drivers": ["Fed cut bets lift bullion", "Safe-haven demand on trade tension"],
+            "updated_at": "2026-10-05T06:02:00+00:00",
+            "pair": {"name": "XAU/USD", "quote": "USD", "quote_score": 52, "gap": 14, "bias": "Bullish"},
+        },
+    ],
+}
+
+MARKET_SESSION_BODY = {
+    "schema": "fxnb.markets.session_bias.v1",
+    "generated_at": "2026-10-05T06:30:00.000Z",
+    "symbol": "XAU",
+    "attribution": ATTRIBUTION,
+    "data": {"pair": "XAU/USD", "tone": "Bullish", "strength": 2, "session": "london",
+             "session_date": "2026-10-05", "entry_time": "2026-10-05T06:20:00+00:00"},
+}
+
+MARKET_SESSIONS_HISTORY_BODY = {
+    "schema": "fxnb.markets.session_bias.history.v1",
+    "generated_at": "2026-10-09T10:00:00.000Z",
+    "query": {"from": "2026-10-05", "to": "2026-10-09", "symbol": "XAU", "status": "settled"},
+    "coverage_from": "2026-10-05",
+    "pip_convention": "XAU/USD: 1 pip = $0.10 per ounce, so move_pips = move_usd * 10",
+    "paging": {"offset": 0, "limit": 500, "returned": 3, "total_matching": 3, "has_more": False, "next_offset": None},
+    "summary": {"settled": 3, "aligned": 1, "contra": 1, "directional": 2, "aligned_pct": 50.0},
+    "attribution": ATTRIBUTION,
+    "data": [
+        {"pair": "XAU/USD", "session": "london", "session_date": "2026-10-05", "tone": "Bullish", "strength": 2,
+         "entry_price": "2650.40", "entry_time": "2026-10-05T06:20:00+00:00", "result_price": 2662.4,
+         "result_time": "2026-10-05T12:13:00+00:00", "move_pct": 0.453, "move_usd": 12, "move_pips": 120,
+         "alignment": "aligned", "status": "settled"},
+        {"pair": "XAU/USD", "session": "newyork", "session_date": "2026-10-05", "tone": "Bearish", "strength": 1,
+         "entry_price": 2662.4, "entry_time": "2026-10-05T12:13:00+00:00", "result_price": 2670.15,
+         "result_time": "2026-10-05T21:13:00+00:00", "move_pct": 0.291, "move_usd": 7.75, "move_pips": 77.5,
+         "alignment": "contra", "status": "settled"},
+        {"pair": "XAU/USD", "session": "asean", "session_date": "2026-10-06", "tone": "Neutral", "strength": 0,
+         "entry_price": 2670.15, "entry_time": "2026-10-05T23:13:00+00:00", "result_price": None,
+         "result_time": None, "move_pct": None, "move_usd": None, "move_pips": None,
+         "alignment": "na", "status": "settled"},
+    ],
+}
+
+
+class RoutingSession:
+    """Answers each path with its own body, and records every URL asked for."""
+
+    def __init__(self, routes, status=200):
+        self.routes = routes
+        self.status = status
+        self.urls = []
+
+    def get(self, url, headers=None, timeout=None):
+        self.urls.append(url)
+        body = self.routes.get(urlparse(url).path, {"error": "not-found"})
+        return FakeResponse(self.status, body, {"x-ratelimit-limit": "1000", "x-ratelimit-remaining": "990"})
+
+    def close(self):
+        pass
+
+
+def _markets_client(**routes):
+    sess = RoutingSession({
+        "/api/v1/markets": MARKETS_BODY,
+        "/api/v1/markets/session-bias": MARKET_SESSION_BODY,
+        "/api/v1/markets/session-bias/history": MARKET_SESSIONS_HISTORY_BODY,
+        **routes,
+    })
+    return Client(VALID_KEY, session=sess), sess
+
+
+def test_markets_parses_gold():
+    fx, sess = _markets_client()
+    m = fx.markets()
+    assert urlparse(sess.urls[0]).path == "/api/v1/markets" and urlparse(sess.urls[0]).query == ""
+    assert isinstance(m, Markets) and len(m) == 1
+    g = m["XAU"]
+    assert isinstance(g, Market)
+    assert (g.symbol, g.name, g.score, g.bias) == ("XAU", "Gold", 66, "Bullish")
+    assert g.is_bullish and not g.is_bearish
+    assert g.drivers == ["Fed cut bets lift bullion", "Safe-haven demand on trade tension"]
+    assert g.updated_at == datetime(2026, 10, 5, 6, 2, tzinfo=timezone.utc)
+    p = g.pair
+    assert (p.name, p.quote, p.quote_score, p.gap, p.bias) == ("XAU/USD", "USD", 52, 14, "Bullish")
+    assert p.gap == g.score - p.quote_score          # same base minus quote rule as spread()
+    assert m.generated_at.tzinfo is not None and m.next_update_expected.hour == 9
+    assert m.raw["attribution"]["url"] == "https://fxnewsbias.com"
+    assert fx.rate_limit == 1000
+
+
+def test_markets_lookup_by_symbol_or_pair_any_case():
+    fx, _ = _markets_client()
+    m = fx.markets()
+    assert m["xau"] is m["XAU/USD"] is m["xauusd"] is m.get("XAU")
+    assert "XAU" in m and "BTC" not in m
+    assert m.symbols() == ["XAU"] and m.scores() == {"XAU": 66}
+    assert m.get("BTC") is None
+    with pytest.raises(KeyError) as e:
+        m["BTC"]
+    assert "XAU" in str(e.value)
+
+
+def test_markets_list_can_grow_without_a_release():
+    """A market this version has never heard of still parses, fields and all."""
+    body = json.loads(json.dumps(MARKETS_BODY))
+    body["data"].append({
+        "symbol": "ZZZ", "name": "Future market", "score": 41, "bias": "Neutral", "drivers": [],
+        "updated_at": "2026-10-05T06:02:00Z", "new_field": "kept",
+        "pair": {"name": "ZZZ/USD", "quote": "USD", "quote_score": 52, "gap": -11, "bias": "Bearish"},
+    })
+    fx, _ = _markets_client(**{"/api/v1/markets": body})
+    m = fx.markets()
+    assert m.symbols() == ["XAU", "ZZZ"]
+    assert m["ZZZ"].pair.bias == "Bearish" and m["ZZZ"].raw["new_field"] == "kept"
+    assert m["XAU"].score == 66                     # adding a market moves nothing else
+
+
+def test_markets_pair_fields_are_none_without_a_quote_score():
+    body = json.loads(json.dumps(MARKETS_BODY))
+    body["data"][0]["pair"].update(quote_score=None, gap=None, bias=None)
+    body["data"][0]["drivers"] = None
+    fx, _ = _markets_client(**{"/api/v1/markets": body})
+    g = fx.markets()["XAU"]
+    assert (g.pair.quote_score, g.pair.gap, g.pair.bias) == (None, None, None)
+    assert g.drivers == [] and g.score == 66
+
+
+def test_markets_empty_list_is_not_an_error():
+    body = dict(MARKETS_BODY, data=[])
+    fx, _ = _markets_client(**{"/api/v1/markets": body})
+    m = fx.markets()
+    assert len(m) == 0 and m.get("XAU") is None
+
+
+def test_markets_seconds_until_next_update_never_negative():
+    body = dict(MARKETS_BODY, next_update_expected=(
+        datetime.now(timezone.utc) - timedelta(hours=5)).isoformat().replace("+00:00", "Z"))
+    fx, _ = _markets_client(**{"/api/v1/markets": body})
+    assert fx.markets().seconds_until_next_update() == 0.0
+    body = {k: v for k, v in MARKETS_BODY.items() if k != "next_update_expected"}
+    fx, _ = _markets_client(**{"/api/v1/markets": body})
+    assert fx.markets().seconds_until_next_update() is None
+
+
+PRO_ONLY = {"error": "pro-only", "message": "Gold and other markets are a Pro feature.",
+            "upgrade": "https://fxnewsbias.com/pricing"}
+
+
+@pytest.mark.parametrize("call", [
+    lambda fx: fx.markets(),
+    lambda fx: fx.markets_history("XAU"),
+    lambda fx: fx.market_session_bias("XAU"),
+    lambda fx: fx.market_session_bias_history("XAU"),
+])
+def test_free_key_on_markets_raises_plan_error(call):
+    sess = FakeSession(status=403, body=PRO_ONLY)
+    with pytest.raises(PlanError) as e:
+        call(Client(VALID_KEY, session=sess))
+    assert e.value.status == 403 and "Pro feature" in e.value.message
+    assert e.value.body["upgrade"] == "https://fxnewsbias.com/pricing"
+    assert sess.calls == 1                             # a plan answer is never retried
+
+
+MARKET_READINGS = [
+    {"symbol": "XAU", "score": 60 + i, "bias": "Bullish", "pair_gap": 8 + i,
+     "pair_bias": "Bullish" if 8 + i > 10 else "Neutral",
+     "scored_at": f"2026-10-0{5 + i // 8}T{(i % 8) * 3:02d}:02:00.{i}+00:00"}
+    for i in range(12)
+]
+
+
+class MarketPagingSession(PagingSession):
+    """PagingSession with the markets history envelope."""
+
+    def get(self, url, headers=None, timeout=None):
+        self.urls.append(url)
+        q = parse_qs(urlparse(url).query)
+        limit = int(q.get("limit", ["500"])[0])
+        offset = int(q.get("offset", ["0"])[0])
+        body = _hist_page(self.rows[offset:offset + limit], offset, limit, self.total)
+        body.update(schema="fxnb.markets.history.v1", coverage_from="2026-10-05",
+                    query={"from": "2026-10-05", "to": "2026-10-06", "symbol": q.get("symbol", [""])[0]},
+                    attribution=ATTRIBUTION)
+        return FakeResponse(200, body, {})
+
+
+def test_markets_history_builds_the_query():
+    sess = MarketPagingSession(MARKET_READINGS)
+    h = Client(VALID_KEY, session=sess).markets_history(
+        " xau ", start="2026-10-05", end=datetime(2026, 10, 6, 15, tzinfo=timezone.utc), limit=100)
+    assert urlparse(sess.urls[0]).path == "/api/v1/markets/history"
+    q = parse_qs(urlparse(sess.urls[0]).query)
+    assert q == {"symbol": ["XAU"], "from": ["2026-10-05"], "to": ["2026-10-06"], "limit": ["100"]}
+    assert isinstance(h, MarketHistory) and h.coverage_from == "2026-10-05"
+
+
+def test_markets_history_parses_rows():
+    h = Client(VALID_KEY, session=MarketPagingSession(MARKET_READINGS)).markets_history("XAU")
+    assert len(h) == 12 and h.paging.total_matching == 12 and h.paging.next_offset is None
+    first, last = h.data[0], h.data[-1]
+    assert (first.symbol, first.score, first.bias, first.pair_gap, first.pair_bias) == ("XAU", 60, "Bullish", 8, "Neutral")
+    assert first.scored_at == datetime(2026, 10, 5, 0, 2, tzinfo=timezone.utc)
+    assert last.pair_gap == 19 and last.pair_bias == "Bullish" and last.is_bullish
+    assert last.scored_at.day == 6
+
+
+def test_iter_markets_history_follows_every_page_once():
+    sess = MarketPagingSession(MARKET_READINGS)
+    got = list(Client(VALID_KEY, session=sess).iter_markets_history("XAU", page_size=5))
+    assert [r.raw for r in got] == MARKET_READINGS     # no row lost or repeated
+    assert len(sess.urls) == 3                          # 5 + 5 + 2
+    qs = [parse_qs(urlparse(u).query) for u in sess.urls]
+    assert [q.get("offset", ["0"])[0] for q in qs] == ["0", "5", "10"]
+    assert all(q["symbol"] == ["XAU"] for q in qs)
+
+
+def test_iter_markets_history_stops_on_an_empty_page():
+    sess = MarketPagingSession([], total=50)
+    assert list(Client(VALID_KEY, session=sess).iter_markets_history("XAU")) == []
+    assert len(sess.urls) == 1
+
+
+@pytest.mark.parametrize("name", [
+    "markets_history", "market_session_bias", "market_session_bias_history",
+])
+@pytest.mark.parametrize("symbol", ["", "   ", None])
+def test_missing_symbol_fails_before_any_request(name, symbol):
+    sess = MarketPagingSession(MARKET_READINGS)
+    with pytest.raises(ValueError) as e:
+        getattr(Client(VALID_KEY, session=sess), name)(symbol)
+    assert "fx.markets()" in str(e.value)
+    assert sess.urls == []
+
+
+@pytest.mark.parametrize("kw", [
+    {"start": "2026-13-01"}, {"end": "yesterday"}, {"limit": 0}, {"limit": 5001}, {"offset": -1},
+])
+@pytest.mark.parametrize("name", ["markets_history", "market_session_bias_history"])
+def test_bad_market_history_arguments_fail_before_any_request(name, kw):
+    sess = MarketPagingSession(MARKET_READINGS)
+    with pytest.raises(ValueError):
+        getattr(Client(VALID_KEY, session=sess), name)("XAU", **kw)
+    assert sess.urls == []
+
+
+def test_unknown_symbol_is_left_to_the_server_and_not_retried():
+    """No local symbol list: a new market must work on an old client."""
+    body = {"error": "bad-symbol", "message": "symbol is required and must be one of XAU."}
+    sess = FakeSession(status=400, body=body)
+    with pytest.raises(ServerError) as e:
+        Client(VALID_KEY, session=sess).markets_history("btc")
+    assert e.value.status == 400 and e.value.body["error"] == "bad-symbol"
+    assert sess.calls == 1
+
+
+def test_a_400_is_a_request_error_not_an_outage():
+    """A wrong request raises RequestError, still catchable as ServerError so
+    1.1.0 code behaves as before, and is never retried. It is not a ValueError,
+    so an `except ValueError` ahead of `except ServerError` routes as in 1.1.0."""
+    from fxnewsbias import RequestError
+    body = {"error": "bad-symbol", "message": "symbol is required and must be one of XAU."}
+    sess = FakeSession(status=400, body=body)
+    with pytest.raises(RequestError) as e:
+        Client(VALID_KEY, session=sess).market_session_bias("xag")
+    assert isinstance(e.value, ServerError) and not isinstance(e.value, ValueError)
+    assert e.value.message == "symbol is required and must be one of XAU."
+    assert e.value.status == 400 and sess.calls == 1
+
+
+def test_a_5xx_is_not_a_request_error():
+    from fxnewsbias import RequestError
+    sess = FakeSession(status=503, body={"error": "unavailable"})
+    with pytest.raises(ServerError) as e:
+        Client(VALID_KEY, session=sess, max_retries=0).markets()
+    assert not isinstance(e.value, RequestError)
+
+
+@pytest.mark.parametrize("given", ["XAU/USD", "xau/usd", "XAUUSD", "xau-usd", " XAU_USD ", "xau"])
+def test_the_pair_name_works_as_a_symbol(given):
+    fx, sess = _markets_client()
+    fx.market_session_bias(given)
+    assert parse_qs(urlparse(sess.urls[0]).query) == {"symbol": ["XAU"]}
+
+
+def test_a_non_pair_symbol_is_sent_as_given():
+    fx, sess = _markets_client()
+    fx.market_session_bias("btc")
+    assert parse_qs(urlparse(sess.urls[0]).query) == {"symbol": ["BTC"]}
+
+
+def test_market_session_bias_parses_the_newest_call():
+    fx, sess = _markets_client()
+    sb = fx.market_session_bias("xau")
+    assert urlparse(sess.urls[0]).path == "/api/v1/markets/session-bias"
+    assert parse_qs(urlparse(sess.urls[0]).query) == {"symbol": ["XAU"]}
+    assert isinstance(sb, MarketSessionBias) and sb.has_call
+    assert (sb.symbol, sb.pair, sb.tone, sb.strength, sb.session, sb.session_date) == (
+        "XAU", "XAU/USD", "Bullish", 2, "london", "2026-10-05")
+    assert sb.entry_time == datetime(2026, 10, 5, 6, 20, tzinfo=timezone.utc)
+
+
+def test_market_session_bias_with_no_call_yet():
+    body = dict(MARKET_SESSION_BODY, data=None)
+    fx, _ = _markets_client(**{"/api/v1/markets/session-bias": body})
+    sb = fx.market_session_bias("XAU")
+    assert not sb.has_call
+    assert (sb.symbol, sb.pair, sb.tone, sb.strength, sb.entry_time) == ("XAU", None, None, None, None)
+
+
+def test_market_session_bias_history_parses_summary_and_rows():
+    fx, sess = _markets_client()
+    h = fx.market_session_bias_history("XAU", start="2026-10-05", end="2026-10-09")
+    assert urlparse(sess.urls[0]).path == "/api/v1/markets/session-bias/history"
+    assert parse_qs(urlparse(sess.urls[0]).query) == {"symbol": ["XAU"], "from": ["2026-10-05"], "to": ["2026-10-09"]}
+    assert isinstance(h, MarketSessionBiasHistory)
+    s = h.summary
+    assert (s.settled, s.aligned, s.contra, s.directional, s.aligned_pct) == (3, 1, 1, 2, 50.0)
+    assert s.aligned + s.contra == s.directional
+    assert "$0.10" in h.pip_convention and h.coverage_from == "2026-10-05"
+    a, c, n = h.data
+    assert isinstance(a, MarketSettledSession) and isinstance(a, SettledSession)
+    assert a.is_aligned and a.is_directional and a.entry_price == 2650.40
+    assert a.move_usd == 12.0 and a.move_pips == 120.0
+    assert c.move_pips == c.move_usd * 10                # gold: 1 pip = $0.10 per ounce
+    assert not c.is_aligned and c.is_directional
+    assert not n.is_directional and n.move_usd is None and n.result_price is None and n.session == "asean"
+
+
+def test_market_session_bias_history_missing_summary_is_none_not_zeros():
+    body = dict(MARKET_SESSIONS_HISTORY_BODY, summary=None,
+                summary_unavailable="A count could not be computed")
+    fx, _ = _markets_client(**{"/api/v1/markets/session-bias/history": body})
+    h = fx.market_session_bias_history("XAU")
+    assert h.summary is None and h.raw["summary_unavailable"].startswith("A count")
+
+
+def test_iter_market_session_bias_history_follows_pages():
+    rows = MARKET_SESSIONS_HISTORY_BODY["data"]
+
+    class Pages(PagingSession):
+        def get(self, url, headers=None, timeout=None):
+            self.urls.append(url)
+            q = parse_qs(urlparse(url).query)
+            limit, offset = int(q.get("limit", ["500"])[0]), int(q.get("offset", ["0"])[0])
+            body = _hist_page(self.rows[offset:offset + limit], offset, limit, self.total)
+            body.update(schema="fxnb.markets.session_bias.history.v1",
+                        summary=MARKET_SESSIONS_HISTORY_BODY["summary"])
+            return FakeResponse(200, body, {})
+
+    sess = Pages(rows)
+    got = list(Client(VALID_KEY, session=sess).iter_market_session_bias_history("XAU", page_size=2))
+    assert [r.raw for r in got] == rows and all(isinstance(r, MarketSettledSession) for r in got)
+    assert len(sess.urls) == 2
+    assert all(parse_qs(urlparse(u).query)["symbol"] == ["XAU"] for u in sess.urls)
+
+
+def test_markets_calls_leave_the_currency_endpoints_alone():
+    """Gold arrives on its own paths: sentiment() still returns exactly the 8."""
+    fx, sess = _markets_client(**{"/api/v1/sentiment": SENTIMENT_BODY})
+    fx.markets()
+    s = fx.sentiment()
+    assert len(s) == 8 and "XAU" not in s.scores()
+    assert [urlparse(u).path for u in sess.urls] == ["/api/v1/markets", "/api/v1/sentiment"]
+
+
+def test_user_agent_carries_the_version():
+    import fxnewsbias
+
+    c = make()
+    c.sentiment()
+    assert c._session.seen_headers["User-Agent"] == f"fxnewsbias-python/{fxnewsbias.__version__}"
+    assert fxnewsbias.__version__ == "1.2.0"
+
+
+def test_package_and_pyproject_versions_match():
+    """The User-Agent and the PyPI upload must name the same release."""
+    import pathlib
+    import re
+
+    import fxnewsbias
+
+    toml = (pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml").read_text()
+    m = re.search(r'^version\s*=\s*"([^"]+)"', toml, re.M)
+    assert m and m.group(1) == fxnewsbias.__version__

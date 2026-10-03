@@ -1,14 +1,14 @@
 # fxnewsbias
 
-Python client for the [FXNewsBias](https://fxnewsbias.com) API: AI-scored news sentiment for the 8 major currencies, as JSON.
+Python client for the [FXNewsBias](https://fxnewsbias.com) API: AI-scored news sentiment for the 8 major currencies and gold (XAU/USD), as JSON.
 
 One number per currency, 0 to 100, refreshed every three hours. Currency labels are 0-40 Bearish, 41-59 Neutral and 60-100 Bullish. Scores describe selected headline tone, not the probability of a price move. A currency without a supported catalyst receives 50 Neutral with an explicit explanation. See the [scoring methodology](https://fxnewsbias.com/how).
 
-Free tier available: any account can create a key at [fxnewsbias.com/developers](https://fxnewsbias.com/developers), no card required.
+Free tier available: any account can create a key at [fxnewsbias.com/developers](https://fxnewsbias.com/developers), no card required. Gold and other markets are on Pro plans, with the same key (see Gold and other markets below).
 
 [![PyPI](https://img.shields.io/pypi/v/fxnewsbias.svg)](https://pypi.org/project/fxnewsbias/)
 [![Python](https://img.shields.io/pypi/pyversions/fxnewsbias.svg)](https://pypi.org/project/fxnewsbias/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/EARNOVAGAMING/fxnewsbias-python/blob/main/LICENSE)
 
 ```bash
 pip install fxnewsbias
@@ -97,6 +97,10 @@ Two tiers, same key format, same client code:
 | `session_bias()` | no | yes |
 | `sentiment_history()` | no | yes, every cycle since 2026-05-19 |
 | `session_bias_history()` | no | yes, settled scorecard since 2026-08-06 |
+| `markets()` (gold) | no | yes |
+| `markets_history()` | no | yes, every cycle since gold was added (`coverage_from`) |
+| `market_session_bias()` | no | yes |
+| `market_session_bias_history()` | no | yes, settled gold calls since they began (`coverage_from`) |
 | Use | non-commercial, with attribution | commercial, in your own product |
 
 Free responses carry `delayed: true` and `delay_hours: 3` (reachable via `.raw`), so the freshness is never ambiguous. `follow()` fits the free tier well: it spends about 8 of the 25 daily calls. Upgrading later changes nothing in your code; the same key switches to real-time automatically.
@@ -115,10 +119,12 @@ The key is never printed, including in `repr()` and tracebacks.
 Every exception carries the HTTP status and the parsed body, because the useful question when something breaks is what the server actually said.
 
 ```python
-from fxnewsbias import AuthError, RateLimitError, PlanError, ServerError
+from fxnewsbias import AuthError, RateLimitError, PlanError, RequestError, ServerError
 
 try:
     s = fx.sentiment()
+except RequestError as e:
+    print(f"the request was wrong: {e.message}")   # e.g. an unknown market symbol
 except RateLimitError as e:
     print(f"allowance spent, resets in {e.retry_after}s")
 except AuthError:
@@ -129,7 +135,7 @@ except ServerError as e:
     print(f"upstream problem: {e.status}")
 ```
 
-A 401, 402, 403 or 429 is an answer, not a failure, so none of them are retried.
+A 400, 401, 402, 403 or 429 is an answer, not a failure, so none of them are retried. `RequestError` (400) is also a `ValueError`, like the argument checks the client makes before sending. It subclasses `ServerError` so code written for 1.1.0 keeps working, which is why it is caught first above.
 
 When a Pro subscription ends the key keeps working: it moves to the free tier in place, so `sentiment()` carries on with delayed data and Pro-only calls raise `PlanError`. Nothing needs changing in your code either way. A 5xx or a dropped connection is retried twice with backoff.
 
@@ -215,6 +221,82 @@ for s in h:
 
 `alignment` is `'aligned'` (price went the called way), `'contra'` (it went against), `'quiet'` (a call, but the move was too small to count) or `'na'` (a Neutral call, nothing to score). Only aligned and contra count toward the hit rate. `iter_session_bias_history()` pages the same way as sentiment.
 
+## Gold and other markets (Pro)
+
+Gold (XAU) is the first instrument beyond the 8 currencies. Markets are on Pro plans only: same key, same daily allowance (each call is one request from the same 1,000 a day), same errors. A free key raises `PlanError`, and an unknown symbol raises `RequestError`. The pair name works as a symbol too: `"XAU/USD"` means `"XAU"`.
+
+They have their own methods and endpoints, so nothing above changes: `sentiment()` still returns exactly the 8 currencies, and `s["XAU"]` or `s.spread("XAU/USD")` raise with a pointer to `fx.markets()`.
+
+The list of markets grows over time. Look a market up by symbol rather than relying on how many there are or their order, and use `m.symbols()` to see what is available.
+
+### `fx.markets()`
+
+The latest reading for every market, refreshed every three hours like the currencies.
+
+```python
+m = fx.markets()
+gold = m.get("XAU")        # or m.get("XAU/USD"); None before a market's first reading
+                           # m["XAU"] works too, and raises KeyError if it is absent
+
+gold.score                 # 66, the same 0 to 100 scale and labels as the currencies
+gold.bias                  # 'Bullish'
+gold.drivers               # the short reasons behind the score
+gold.updated_at            # datetime, tz-aware
+
+gold.pair.name             # 'XAU/USD'
+gold.pair.quote_score      # 52, the latest USD score when this reading was made
+gold.pair.gap              # 14, gold minus USD, the same convention as spread()
+gold.pair.bias             # 'Bullish' above +10, 'Bearish' below -10, else 'Neutral'
+
+m.symbols()                # ['XAU'] today, more as markets are added
+m.seconds_until_next_update()
+```
+
+`pair.quote_score`, `pair.gap` and `pair.bias` are `None` for a cycle that had no USD score to compare against.
+
+### `fx.markets_history()`
+
+One market's past readings, every 3-hour cycle, oldest first. `symbol` is required. Dates, `limit` and paging work exactly as in `sentiment_history()`.
+
+```python
+h = fx.markets_history("XAU")      # the last 30 days
+
+for r in h:
+    print(r.scored_at, r.score, r.bias, r.pair_gap, r.pair_bias)
+
+h.coverage_from                    # the first date gold was scored
+
+for r in fx.iter_markets_history("XAU", start=h.coverage_from):
+    store(r.symbol, r.scored_at, r.score)
+```
+
+### `fx.market_session_bias()`
+
+The newest session call for one market's pair, for example XAU/USD. Calls are made on weekdays for the same three sessions as the currency pairs.
+
+```python
+sb = fx.market_session_bias("XAU")
+
+if sb.has_call:                    # False before the first call
+    print(sb.pair, sb.session, sb.session_date, sb.tone, sb.strength)
+```
+
+### `fx.market_session_bias_history()`
+
+The settled calls for one market, misses included, with the same alignment rules as `session_bias_history()`. The summary covers that market alone and is never mixed into the currency pair scorecard.
+
+```python
+h = fx.market_session_bias_history("XAU")
+
+h.summary.aligned_pct      # gold only, over the whole range (summary is None if it could not be counted)
+h.pip_convention           # how move_pips is measured
+
+for s in h:
+    print(s.session_date, s.session, s.tone, s.alignment, s.move_usd, s.move_pips)
+```
+
+Gold moves are quoted in US dollars per ounce. `move_usd` is the move in dollars, and for gold 1 pip is $0.10 per ounce, so `move_pips` is `move_usd * 10`. `iter_market_session_bias_history()` pages the same way as the others.
+
 ## Worked example: a news filter for a backtest
 
 Record what the news backdrop was at entry, so you can check afterwards whether it mattered.
@@ -263,6 +345,7 @@ Tests run against a fake transport, so they need no key and never touch the live
 - [API documentation](https://fxnewsbias.com/developers)
 - [Pricing](https://fxnewsbias.com/pricing)
 - [Data quality report](https://fxnewsbias.com/data-quality): live coverage figures, updated automatically
+- [Changelog](https://github.com/EARNOVAGAMING/fxnewsbias-python/blob/main/CHANGELOG.md)
 
 ## Attribution
 

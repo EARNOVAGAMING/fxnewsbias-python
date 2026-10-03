@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -16,8 +17,14 @@ import urllib.request
 from datetime import date, datetime
 from typing import Any, Dict, Iterator, Optional, Union
 
-from .errors import AuthError, FXNewsBiasError, PlanError, RateLimitError, ServerError
+from .errors import AuthError, FXNewsBiasError, PlanError, RateLimitError, RequestError, ServerError
 from .models import (
+    MarketHistory,
+    MarketReading,
+    Markets,
+    MarketSessionBias,
+    MarketSessionBiasHistory,
+    MarketSettledSession,
     SentimentHistory,
     SentimentReading,
     Sentiment,
@@ -46,8 +53,8 @@ class Client:
     Args:
         api_key: your key. Falls back to ``$FXNEWSBIAS_API_KEY``.
         timeout: seconds per request.
-        max_retries: retries for 5xx and network failures only. A 401, 402, 403
-            or 429 is never retried: those are answers, not failures, and hammering
+        max_retries: retries for 5xx and network failures only. A 400, 401, 402,
+            403 or 429 is never retried: those are answers, not failures, and hammering
             a 429 only spends the allowance you are already out of.
         base_url: override for testing.
         session: an existing ``requests.Session`` to reuse the connection pool.
@@ -198,6 +205,133 @@ class Client:
                 return
             offset = page.paging.next_offset
 
+    # --------------------------------------------------------------- markets
+    #
+    # Instruments beyond the 8 currencies, starting with gold (XAU). Pro plans
+    # only, on the same key and the same daily allowance; every call below is
+    # one request. A free key raises ``PlanError``. They live on their own
+    # endpoints, so sentiment() and the other currency calls never change.
+
+    def markets(self) -> Markets:
+        """The latest reading for every market, for example gold. Pro plans only.
+
+            m = fx.markets()
+            gold = m.get("XAU")             # None before a market's first reading
+            if gold:
+                print(gold.score, gold.bias, gold.drivers)
+                print(gold.pair.name, gold.pair.gap, gold.pair.bias)   # XAU/USD
+
+        The list grows as instruments are added: look a market up by symbol
+        rather than relying on its length or position.
+        Raises ``PlanError`` on a free key.
+        """
+        return Markets._from(self._get("/api/v1/markets"))
+
+    def markets_history(
+        self,
+        symbol: str,
+        *,
+        start: Optional[DateLike] = None,
+        end: Optional[DateLike] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> MarketHistory:
+        """One page of one market's past readings, every 3-hour cycle. Pro only.
+
+            h = fx.markets_history("XAU", start="2026-10-05")
+            for r in h:
+                print(r.scored_at, r.score, r.bias, r.pair_gap, r.pair_bias)
+
+        ``symbol`` is required, for example ``"XAU"``; ``fx.markets()`` lists
+        them. ``start``, ``end``, ``limit`` and ``offset`` work exactly as in
+        ``sentiment_history``. ``iter_markets_history`` follows the pages.
+        Raises ``PlanError`` on a free key.
+        """
+        params = _history_params(start, end, limit, offset)
+        params["symbol"] = _symbol_param(symbol)
+        return MarketHistory._from(self._get("/api/v1/markets/history", params))
+
+    def iter_markets_history(
+        self,
+        symbol: str,
+        *,
+        start: Optional[DateLike] = None,
+        end: Optional[DateLike] = None,
+        page_size: int = 5000,
+    ) -> Iterator[MarketReading]:
+        """Every reading for one market in the range, oldest first, one request per page."""
+        offset = 0
+        while True:
+            page = self.markets_history(
+                symbol, start=start, end=end, limit=page_size, offset=offset
+            )
+            for row in page:
+                yield row
+            if page.paging.next_offset is None or not page.data:
+                return
+            offset = page.paging.next_offset
+
+    def market_session_bias(self, symbol: str) -> MarketSessionBias:
+        """The newest session call for one market, for example XAU/USD. Pro only.
+
+            sb = fx.market_session_bias("XAU")
+            if sb.has_call:
+                print(sb.pair, sb.session, sb.tone, sb.strength)
+
+        Raises ``PlanError`` on a free key.
+        """
+        params = {"symbol": _symbol_param(symbol)}
+        return MarketSessionBias._from(self._get("/api/v1/markets/session-bias", params))
+
+    def market_session_bias_history(
+        self,
+        symbol: str,
+        *,
+        start: Optional[DateLike] = None,
+        end: Optional[DateLike] = None,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> MarketSessionBiasHistory:
+        """One page of one market's settled session calls. Pro plans only.
+
+            h = fx.market_session_bias_history("XAU", start="2026-10-05")
+            if h.summary:                   # None if the server could not count
+                print(h.summary.aligned_pct)   # gold only, over the whole range
+            for s in h:
+                print(s.session_date, s.session, s.tone, s.alignment, s.move_usd, s.move_pips)
+
+        Settled calls only, misses included, with the same alignment rules as
+        ``session_bias_history``. ``summary`` covers this market alone and is
+        never mixed into the currency pair scorecard. For gold, 1 pip is $0.10
+        per ounce, so ``move_pips`` is ``move_usd * 10``.
+        Raises ``PlanError`` on a free key.
+        """
+        params = _history_params(start, end, limit, offset)
+        params["symbol"] = _symbol_param(symbol)
+        return MarketSessionBiasHistory._from(
+            self._get("/api/v1/markets/session-bias/history", params)
+        )
+
+    def iter_market_session_bias_history(
+        self,
+        symbol: str,
+        *,
+        start: Optional[DateLike] = None,
+        end: Optional[DateLike] = None,
+        page_size: int = 5000,
+    ) -> Iterator[MarketSettledSession]:
+        """Every settled call for one market in the range, oldest first, one request per page."""
+        offset = 0
+        while True:
+            page = self.market_session_bias_history(
+                symbol, start=start, end=end, limit=page_size, offset=offset
+            )
+            for row in page:
+                yield row
+            if page.paging.next_offset is None or not page.data:
+                return
+            offset = page.paging.next_offset
+
     def follow(self, min_seconds: float = 60.0) -> Iterator[Sentiment]:
         """Yield a fresh reading each time the data actually changes.
 
@@ -266,7 +400,23 @@ class Client:
             if status == 200:
                 return body
 
+            # Error replies are JSON objects; anything else (null, a list, a
+            # bare string) is kept under "raw" so the branches below can read
+            # it safely.
+            if not isinstance(body, dict):
+                body = {"raw": body}
+
             # Answers, not failures. Never retried.
+            if status == 400:
+                # The call itself was wrong (an unknown market symbol, a bad
+                # parameter). RequestError says so; it subclasses ServerError
+                # only so 1.1.0 code that caught a 400 that way still does.
+                raise RequestError(
+                    body.get("message")
+                    or f"HTTP 400 from {path}: {body_text[:200]}",
+                    status=status,
+                    body=body,
+                )
             if status == 401:
                 # Prefer the server's reason. It distinguishes a missing header
                 # from a malformed one from a key that is no longer active, and
@@ -377,6 +527,23 @@ def _history_params(
             raise ValueError(f"offset must be a whole number of 0 or more, got {offset!r}.")
         params["offset"] = offset
     return params
+
+
+def _symbol_param(symbol: str) -> str:
+    # No local list of symbols: markets are added on the server, and an old
+    # copy of this package should reach a new one without a release. The
+    # server answers an unknown symbol with a 400 (RequestError) that names
+    # the valid ones. The pair name works too, as Markets.get() accepts it:
+    # "XAU/USD", "XAUUSD" and "xau-usd" all mean "XAU".
+    text = str(symbol or "").strip().upper()
+    if not text:
+        raise ValueError(
+            "symbol is required, for example 'XAU'. fx.markets() lists every symbol."
+        )
+    pair = re.fullmatch(r"([A-Z]{3})[/\-_ ]?USD", text)
+    if pair and pair.group(1) != "USD":
+        return pair.group(1)
+    return text
 
 
 def _int_or(value: Any, default: Any) -> Any:

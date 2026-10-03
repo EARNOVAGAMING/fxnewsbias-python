@@ -51,4 +51,19 @@ class RateLimitError(FXNewsBiasError):
 
 
 class ServerError(FXNewsBiasError):
-    """5xx, or a network failure that survived the retries."""
+    """5xx, or a network failure that survived the retries.
+
+    A 400 raises ``RequestError``, a subclass of this one so that code written
+    for 1.1.0 (where a 400 was a plain ``ServerError``) behaves exactly as
+    before. Catch ``RequestError`` first to tell a wrong request from an outage.
+    """
+
+
+class RequestError(ServerError):
+    """400. The request itself was wrong, for example an unknown market symbol.
+
+    An answer about the call, not an outage, so it is never retried. It
+    subclasses ``ServerError`` so code written for 1.1.0, where a 400 was a
+    plain ``ServerError``, catches it exactly as before. ``message`` is the
+    server's reason.
+    """
