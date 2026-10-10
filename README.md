@@ -1,6 +1,6 @@
 # fxnewsbias
 
-Python client for the [FXNewsBias](https://fxnewsbias.com) API: AI-scored news sentiment for the 8 major currencies and gold (XAU/USD), as JSON.
+Python client for the [FXNewsBias](https://fxnewsbias.com) API: AI-scored news sentiment for the 8 major currencies, gold and the other markets (silver, oil, crypto and the US indices), as JSON.
 
 One number per currency, 0 to 100, refreshed every three hours. Currency labels are 0-40 Bearish, 41-59 Neutral and 60-100 Bullish. Scores describe selected headline tone, not the probability of a price move. A currency without a supported catalyst receives 50 Neutral with an explicit explanation. See the [scoring methodology](https://fxnewsbias.com/how).
 
@@ -97,10 +97,10 @@ Two tiers, same key format, same client code:
 | `session_bias()` | no | yes |
 | `sentiment_history()` | no | yes, every cycle since 2026-05-19 |
 | `session_bias_history()` | no | yes, settled scorecard since 2026-08-06 |
-| `markets()` (gold) | no | yes |
-| `markets_history()` | no | yes, every cycle since gold was added (`coverage_from`) |
+| `markets()` (gold, silver, oil, crypto, US indices) | no | yes |
+| `markets_history()` | no | yes, every cycle since the market was added (`coverage_from`) |
 | `market_session_bias()` | no | yes |
-| `market_session_bias_history()` | no | yes, settled gold calls since they began (`coverage_from`) |
+| `market_session_bias_history()` | no | yes, the market's settled calls since they began (`coverage_from`) |
 | Use | non-commercial, with attribution | commercial, in your own product |
 
 Free responses carry `delayed: true` and `delay_hours: 3` (reachable via `.raw`), so the freshness is never ambiguous. `follow()` fits the free tier well: it spends about 8 of the 25 daily calls. Upgrading later changes nothing in your code; the same key switches to real-time automatically.
@@ -223,7 +223,7 @@ for s in h:
 
 ## Gold and other markets (Pro)
 
-Gold (XAU) is the first instrument beyond the 8 currencies. Markets are on Pro plans only: same key, same daily allowance (each call is one request from the same 1,000 a day), same errors. A free key raises `PlanError`, and an unknown symbol raises `RequestError`. The pair name works as a symbol too: `"XAU/USD"` means `"XAU"`.
+Markets are the instruments beyond the 8 currencies: gold (`XAU`) first, and since 10 October 2026 silver (`XAG`), WTI crude (`WTI`), Brent crude (`XBR`), Bitcoin (`BTC`), Ethereum (`ETH`), Solana (`SOL`), XRP (`XRP`), BNB (`BNB`) and the US 500 (`SPX`), US Tech 100 (`NDX`) and Dow 30 (`DJI`), the last three read through their ETF proxies (SPY, QQQ and DIA), so an index read follows the ETF and is not an index level. The website shows each market on its own page, gold on the [XAU/USD page](https://fxnewsbias.com/markets/xau-usd), and lists every market on the [Markets page](https://fxnewsbias.com/markets). Markets are on Pro plans only: same key, same daily allowance (each call is one request from the same 1,000 a day), same errors. A free key raises `PlanError`, and an unknown symbol raises `RequestError`. The pair name works as a symbol too: `"XAU/USD"` means `"XAU"` and `"BTC/USD"` means `"BTC"`; the US indices are addressed by symbol (`"SPX"`, `"NDX"`, `"DJI"`).
 
 They have their own methods and endpoints, so nothing above changes: `sentiment()` still returns exactly the 8 currencies, and `s["XAU"]` or `s.spread("XAU/USD")` raise with a pointer to `fx.markets()`.
 
@@ -248,7 +248,7 @@ gold.pair.quote_score      # 52, the latest USD score when this reading was made
 gold.pair.gap              # 14, gold minus USD, the same convention as spread()
 gold.pair.bias             # 'Bullish' above +10, 'Bearish' below -10, else 'Neutral'
 
-m.symbols()                # ['XAU'] today, more as markets are added
+m.symbols()                # every market with a reading, for example ['XAU', 'XAG', 'BTC', ...]; look up by symbol, never by position
 m.seconds_until_next_update()
 ```
 
@@ -344,6 +344,7 @@ Tests run against a fake transport, so they need no key and never touch the live
 
 - [API documentation](https://fxnewsbias.com/developers)
 - [Pricing](https://fxnewsbias.com/pricing)
+- [Markets](https://fxnewsbias.com/markets): gold (XAU/USD) and the other markets on the website
 - [Data quality report](https://fxnewsbias.com/data-quality): live coverage figures, updated automatically
 - [Changelog](https://github.com/EARNOVAGAMING/fxnewsbias-python/blob/main/CHANGELOG.md)
 

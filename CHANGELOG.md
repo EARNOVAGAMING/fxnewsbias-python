@@ -4,6 +4,22 @@ All notable changes to the `fxnewsbias` Python client. Versions follow
 [semantic versioning](https://semver.org): a minor release adds methods, and
 nothing an existing integration relies on changes shape or meaning.
 
+## 1.2.1 (10 Oct 2026)
+
+Documentation only, no code change. Every existing call keeps its shape.
+
+- Eleven more markets are served by the existing methods: silver (XAG), WTI
+  crude (WTI), Brent crude (XBR), Bitcoin (BTC), Ethereum (ETH), Solana
+  (SOL), XRP (XRP), BNB (BNB) and the US 500 (SPX), US Tech 100 (NDX) and
+  Dow 30 (DJI), the last three read through their ETF proxies (SPY, QQQ,
+  DIA). `fx.markets()` lists them as each gets its first reading;
+  `markets_history()`, `market_session_bias()` and
+  `market_session_bias_history()` take the new symbols. The README documents
+  the symbols and notes that the US indices are addressed by symbol.
+- The README links the gold page at its new address,
+  https://fxnewsbias.com/markets/xau-usd (the old /pairs/xau-usd address
+  redirects there), and the Markets page, https://fxnewsbias.com/markets.
+
 ## 1.2.0 (3 Oct 2026)
 
 Gold (XAU/USD) and the markets endpoints. Additive only: every existing
