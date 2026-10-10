@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fxnewsbias"
-version = "1.2.1"
-description = "AI-scored forex news sentiment for the 8 major currencies and gold (XAU/USD), as JSON"
+version = "1.2.2"
+description = "AI-scored sentiment for the 8 major currencies, 15 forex pairs, gold, silver, oil, crypto and US indices, as JSON"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
@@ -13,7 +13,8 @@ authors = [{ name = "FXNewsBias" }]
 keywords = [
   "forex", "fx", "trading", "algorithmic-trading", "sentiment",
   "news-sentiment", "currency", "market-data", "backtesting", "api",
-  "gold", "xauusd",
+  "gold", "xauusd", "silver", "oil", "crypto", "bitcoin", "ethereum",
+  "stock-indices",
 ]
 classifiers = [
   "Development Status :: 5 - Production/Stable",

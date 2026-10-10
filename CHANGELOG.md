@@ -4,6 +4,12 @@ All notable changes to the `fxnewsbias` Python client. Versions follow
 [semantic versioning](https://semver.org): a minor release adds methods, and
 nothing an existing integration relies on changes shape or meaning.
 
+## 1.2.2 (10 Oct 2026)
+
+Package metadata only, no code change. The PyPI summary and keywords name
+every market the client serves (gold, silver, oil, crypto and the US
+indices), matching the 1.2.1 README.
+
 ## 1.2.1 (10 Oct 2026)
 
 Documentation only, no code change. Every existing call keeps its shape.

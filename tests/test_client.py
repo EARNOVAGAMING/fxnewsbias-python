@@ -891,7 +891,7 @@ def test_user_agent_carries_the_version():
     c = make()
     c.sentiment()
     assert c._session.seen_headers["User-Agent"] == f"fxnewsbias-python/{fxnewsbias.__version__}"
-    assert fxnewsbias.__version__ == "1.2.1"
+    assert fxnewsbias.__version__ == "1.2.2"
 
 
 def test_package_and_pyproject_versions_match():
