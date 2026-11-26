@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fxnewsbias"
-version = "1.2.2"
+version = "1.2.3"
 description = "AI-scored sentiment for the 8 major currencies, 15 forex pairs, gold, silver, oil, crypto and US indices, as JSON"
 readme = "README.md"
 requires-python = ">=3.8"

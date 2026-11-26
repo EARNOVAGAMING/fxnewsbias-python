@@ -4,6 +4,13 @@ All notable changes to the `fxnewsbias` Python client. Versions follow
 [semantic versioning](https://semver.org): a minor release adds methods, and
 nothing an existing integration relies on changes shape or meaning.
 
+## 1.2.3 (26 Nov 2026)
+
+Documentation only, no code change. The README's plan table now says what
+the terms say: a Pro key covers one person's own trading, research and
+tools, and showing the data to customers or the public, or sharing it in a
+team, needs a business licence (fxnewsbias.com/business).
+
 ## 1.2.2 (10 Oct 2026)
 
 Package metadata only, no code change. The PyPI summary and keywords name

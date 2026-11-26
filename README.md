@@ -101,7 +101,9 @@ Two tiers, same key format, same client code:
 | `markets_history()` | no | yes, every cycle since the market was added (`coverage_from`) |
 | `market_session_bias()` | no | yes |
 | `market_session_bias_history()` | no | yes, the market's settled calls since they began (`coverage_from`) |
-| Use | non-commercial, with attribution | commercial, in your own product |
+| Use | non-commercial, with attribution | one person's own trading, research and tools |
+
+A Pro key belongs to one person and may not be shared. Showing the data to customers, members or the public, or using it in a team or a shared system, needs a business licence: see [fxnewsbias.com/business](https://fxnewsbias.com/business).
 
 Free responses carry `delayed: true` and `delay_hours: 3` (reachable via `.raw`), so the freshness is never ambiguous. `follow()` fits the free tier well: it spends about 8 of the 25 daily calls. Upgrading later changes nothing in your code; the same key switches to real-time automatically.
 
