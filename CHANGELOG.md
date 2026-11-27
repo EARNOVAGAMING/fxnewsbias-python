@@ -4,6 +4,12 @@ All notable changes to the `fxnewsbias` Python client. Versions follow
 [semantic versioning](https://semver.org): a minor release adds methods, and
 nothing an existing integration relies on changes shape or meaning.
 
+## 1.2.4 (27 Nov 2026)
+
+Documentation only, no code change. The README's links now include the
+public scorecard, the FXNB Sentiment Indicator for MetaTrader 5 and the
+weekly analytics report.
+
 ## 1.2.3 (26 Nov 2026)
 
 Documentation only, no code change. The README's plan table now says what

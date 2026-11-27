@@ -348,6 +348,9 @@ Tests run against a fake transport, so they need no key and never touch the live
 - [Pricing](https://fxnewsbias.com/pricing)
 - [Markets](https://fxnewsbias.com/markets): gold (XAU/USD) and the other markets on the website
 - [Data quality report](https://fxnewsbias.com/data-quality): live coverage figures, updated automatically
+- [Public scorecard](https://fxnewsbias.com/scorecard): every session bias call, settled against the market
+- [FXNB Sentiment Indicator for MetaTrader 5](https://fxnewsbias.com/mt5-indicator): the same sentiment scores and session calls on an MT5 chart, a separate product with a free demo
+- [Weekly Sentiment Analytics](https://fxnewsbias.com/weekly-analytics): a research report and CSV data pack every Monday, part of Pro
 - [Changelog](https://github.com/EARNOVAGAMING/fxnewsbias-python/blob/main/CHANGELOG.md)
 
 ## Attribution
